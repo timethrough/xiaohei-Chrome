@@ -1,0 +1,4 @@
+interface:
+  display_name: "小黑多开器"
+  short_description: "通过安全的本地 API 和 MCP 管理小黑多开器浏览器环境"
+  default_prompt: "Use $xiaohei-browser to list my local browser environments and start the one I choose."

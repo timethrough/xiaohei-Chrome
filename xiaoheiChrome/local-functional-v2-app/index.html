@@ -7,7 +7,8 @@
   <link rel="icon" type="image/png" href="assets/logo.png">
   <link rel="stylesheet" href="styles.css?v=20260716-storage1">
   <link rel="stylesheet" href="themes.css?v=20260716-theme2">
-  <link rel="stylesheet" href="v14.css?v=20260717-v14">
+  <link rel="stylesheet" href="table-layout.css?v=20260724-v15">
+  <link rel="stylesheet" href="v15.css?v=20260724-v15">
   <style id="profile-typography-v2">
     #view-profiles .table-card { overflow-x: auto; }
     #view-profiles .table-card table,
@@ -37,6 +38,7 @@
         <button class="nav" data-view="extensions"><span>♧</span>应用中心</button>
         <div class="nav-label">自动化</div>
         <button class="nav" data-view="sync"><span>⌘</span>窗口同步</button>
+        <button class="nav" data-view="api"><span>⌁</span>API &amp; MCP</button>
         <button class="nav" data-view="logs"><span>≡</span>操作日志</button>
         <button class="nav" data-view="system"><span>⚙</span>本地设置</button>
       </nav>
@@ -207,6 +209,74 @@
           </div>
         </section>
 
+        <section class="view" id="view-api">
+          <div class="api-page">
+            <article class="api-card api-hero">
+              <div class="api-card-head">
+                <div><span class="api-eyebrow">V15 本地自动化接口</span><h2>API 设置</h2><p>通过程序化方式读取和更新环境配置、创建环境、启动与关闭环境，并把运行中的 Chrome 交给 Selenium 或 Puppeteer。</p></div>
+                <label class="api-enable"><input id="api-enabled" type="checkbox"><span>启用 Local API</span></label>
+              </div>
+              <div class="api-status-line"><span class="api-status-dot" id="api-status-dot"></span><strong id="api-status-text">正在检查接口...</strong><span id="api-security-summary"></span></div>
+              <div class="api-field">
+                <label>接口地址</label><code id="api-url">http://127.0.0.1:51415</code><button class="outline api-copy" id="copy-api-url" type="button">复制</button>
+              </div>
+              <div class="api-field">
+                <label>API Key</label><input id="api-key" type="password" readonly autocomplete="off"><button class="outline api-copy" id="toggle-api-key" type="button">显示</button><button class="outline api-copy" id="copy-api-key" type="button">复制</button><button class="outline api-reset" id="reset-api-key" type="button">重置 Key</button>
+              </div>
+              <div class="api-security-note"><strong>安全校验已强制启用</strong><span>接口只监听 127.0.0.1，拒绝外部 Host、跨站 Origin 和未携带 Key 的请求。Key 仅保存在当前 Windows 用户目录。</span></div>
+            </article>
+
+            <div class="api-grid">
+              <article class="api-card">
+                <div class="api-card-head compact"><div><h2>基础接口</h2><p>响应采用 JSON，环境查询默认隐藏代理密码、Cookie 和本地路径。</p></div><span class="api-chip">OpenAPI 3.1</span></div>
+                <div class="endpoint-list">
+                  <div><b>GET</b><code>/api/v1/profiles</code><span>查询环境</span></div>
+                  <div><b>POST</b><code>/api/v1/profiles</code><span>创建环境</span></div>
+                  <div><b>PATCH</b><code>/api/v1/profiles/{id}</code><span>更新配置</span></div>
+                  <div><b>POST</b><code>/api/v1/profiles/{id}/start</code><span>启动并返回 CDP</span></div>
+                  <div><b>POST</b><code>/api/v1/profiles/{id}/stop</code><span>安全关闭</span></div>
+                  <div><b>GET</b><code>/api/v1/sessions</code><span>查询会话和标签页</span></div>
+                </div>
+                <div class="api-usage"><strong>使用须知</strong><p>调用时发送请求头 <code>X-API-Key</code>。启动接口会返回 <code>debuggerAddress</code>、<code>browserURL</code> 和 <code>browserWSEndpoint</code>，可供自动化框架附加到现有环境。</p></div>
+              </article>
+
+              <article class="api-card">
+                <div class="api-card-head compact"><div><h2>Selenium / Puppeteer</h2><p>连接现有浏览器，不重复打开同一 Profile。</p></div><span class="api-chip">真实 CDP</span></div>
+                <div class="automation-tabs"><button class="active" type="button" data-automation-tab="puppeteer">Puppeteer</button><button type="button" data-automation-tab="selenium">Selenium</button></div>
+                <pre class="api-code active" id="automation-puppeteer"><code>const browser = await puppeteer.connect({
+  browserWSEndpoint: started.data.automation.browserWSEndpoint
+});</code></pre>
+                <pre class="api-code" id="automation-selenium"><code>options = Options()
+options.debugger_address = started["data"]["automation"]["debuggerAddress"]
+driver = webdriver.Chrome(options=options)</code></pre>
+              </article>
+            </div>
+
+            <article class="api-card">
+              <div class="api-card-head compact">
+                <div><h2>MCP Server</h2><p>在 Claude、Cursor、Codex 等支持 MCP 的 AI 工具中，通过对话查询、创建、更新、启动和停止环境。</p></div>
+                <button class="primary" id="copy-mcp-config" type="button">复制配置</button>
+              </div>
+              <pre class="mcp-config"><code id="mcp-config">正在生成本机 MCP 配置...</code></pre>
+              <p class="api-footnote">MCP 采用 stdio，本机子进程从受保护的设置文件读取 Key；配置文本本身不包含 API Key。</p>
+            </article>
+
+            <article class="api-card">
+              <div class="api-card-head compact">
+                <div><h2>Skill 技能包</h2><p>为 AI 提供安全工作流和 API 参考，帮助它正确选择环境、调用 MCP，并避免泄露凭据。</p></div>
+                <button class="outline" id="open-skill-folder" type="button">打开 Skill 目录</button>
+              </div>
+              <div class="skill-compatibility"><span>Claude Code</span><span>Codex</span><span>Cursor</span><span>OpenCode</span><span>Gemini GL</span><span>OpenClaw</span><span>Hermes agent</span></div>
+              <div class="skill-install-list">
+                <div><label>Claude Code / Codex / Cursor / OpenCode / Gemini</label><code id="skill-install-agents">正在生成...</code><button class="outline" id="copy-skill-install-agents" type="button">复制命令</button></div>
+                <div><label>OpenClaw</label><code id="skill-install-openclaw">正在生成...</code><button class="outline" id="copy-skill-install-openclaw" type="button">复制命令</button></div>
+                <div><label>Hermes agent（PowerShell）</label><code id="skill-install-hermes">正在生成...</code><button class="outline" id="copy-skill-install-hermes" type="button">复制命令</button></div>
+              </div>
+              <div class="api-field skill-path-field"><label>本机 Skill 路径</label><code id="skill-path">正在读取...</code><button class="outline api-copy" id="copy-skill-path" type="button">复制</button></div>
+              <div class="api-usage"><strong>安装方式</strong><p>把完整的 <code>xiaohei-browser</code> 文件夹复制到目标 AI 工具的 Skills 目录，并同时添加上方 MCP 配置。不同工具的 Skills 目录规则不同，请按对应工具文档放置。</p></div>
+            </article>
+          </div>
+        </section>
         <section class="view" id="view-logs"><div class="toolbar"><button class="outline" id="clear-logs">清空日志</button></div><div class="log-card" id="log-list"></div></section>
         <section class="view" id="view-system"><div class="settings-grid"><article><h3>运行时</h3><dl id="runtime-info"></dl></article><article><h3>能力状态</h3><dl><div><dt>真实浏览器进程</dt><dd class="ok">已启用</dd></div><div><dt>独立用户目录</dt><dd class="ok">已启用</dd></div><div><dt>扩展批量加载</dt><dd class="ok">已启用</dd></div><div><dt>Chrome DevTools Protocol</dt><dd class="ok">已启用</dd></div><div><dt>厂商私有服务</dt><dd>未使用</dd></div></dl></article><article class="storage-settings-card"><div class="storage-settings-head"><div><h3>环境缓存与数据位置</h3><p>各环境的 Chrome 用户目录、Cookie、缓存、本地存储、IndexedDB 和会话数据都会保存在这里。</p></div><span>本地保存</span></div><div class="storage-path-box"><small>当前目录</small><code id="profile-storage-path">正在读取...</code></div><div class="storage-actions"><button class="primary" id="choose-profile-storage" type="button">选择新目录</button><button class="outline" id="open-profile-storage" type="button">打开目录</button><button class="outline" id="reset-profile-storage" type="button">恢复默认位置</button></div><p class="storage-warning">修改前请先停止所有环境。新位置在环境下次启动时生效；旧目录中的数据不会自动移动或删除。</p></article></div></section>
       </main>
@@ -222,7 +292,7 @@
 
   <dialog id="assign-dialog"><form method="dialog"><div class="dialog-head"><div><h2>批量分配应用</h2><p id="assign-extension-name"></p></div><button value="cancel">×</button></div><div id="assign-profile-list" class="assign-list"></div><div class="dialog-actions"><button value="cancel" class="outline">取消</button><button value="disable" class="danger" id="unassign-extension">移除选中</button><button value="enable" class="primary" id="assign-extension">添加到选中环境</button></div></form></dialog>
   <dialog id="batch-update-dialog"><form method="dialog" id="batch-update-form"><div class="dialog-head"><div><h2>&#25209;&#37327;&#26356;&#26032;&#29615;&#22659;/IP</h2><p>&#27599;&#34892;&#19968;&#20010;&#20195;&#29702;&#65292;&#25353;&#36873;&#20013;&#29615;&#22659;&#39034;&#24207;&#24490;&#29615;&#20998;&#37197;</p></div><button value="cancel">&times;</button></div><label>&#20195;&#29702;&#21015;&#34920;<textarea id="batch-proxy-list" placeholder="127.0.0.1:7890&#10;socks5://127.0.0.1:1080"></textarea></label><label class="assign-item"><input id="restart-running" type="checkbox" checked> &#26356;&#26032;&#21518;&#33258;&#21160;&#37325;&#21551;&#21407;&#26412;&#36816;&#34892;&#30340;&#29615;&#22659;</label><div class="dialog-actions"><button value="cancel" class="outline">&#21462;&#28040;</button><button value="default" class="primary">&#24212;&#29992;&#26356;&#26032;</button></div></form></dialog><dialog id="add-app-dialog"><div class="dialog-head"><div><h2>&#28155;&#21152;&#24212;&#29992;</h2><p>&#20174;&#26412;&#22320;&#30446;&#24405;&#25110; Chrome &#24212;&#29992;&#21830;&#24215;&#28155;&#21152;</p></div><button id="close-add-app">&times;</button></div><div class="store-source-tabs"><button class="outline" id="choose-extension-folder">&#23433;&#35013;&#21253;&#30446;&#24405;</button><button class="primary" type="button">Chrome &#24212;&#29992;&#21830;&#24215;</button></div><label>Chrome &#24212;&#29992;&#21830;&#24215; URL<input id="chrome-store-url" placeholder="https://chromewebstore.google.com/detail/.../extension-id"></label><label class="assign-item"><input id="store-assign-all" type="checkbox" checked> &#28155;&#21152;&#21040;&#25152;&#26377;&#29615;&#22659;&#24182;&#37325;&#21551;&#27491;&#22312;&#36816;&#34892;&#30340;&#29615;&#22659;</label><p class="store-note">&#21482;&#25509;&#21463; Chrome Web Store &#38142;&#25509;&#65307;&#19979;&#36733;&#21518;&#20250;&#26657;&#39564; CRX &#26684;&#24335;&#21644;&#25991;&#20214;&#36335;&#24452;&#12290;</p><div class="dialog-actions"><button class="outline" id="cancel-add-app">&#21462;&#28040;</button><button class="primary" id="add-store-submit">&#30830;&#23450;&#28155;&#21152;</button></div></dialog><div class="toast" id="toast"></div>
-  <script src="environment-audit.js?v=20260717-v14"></script>
-  <script src="renderer.js?v=20260717-v14"></script>
+  <script src="environment-audit.js?v=20260724-v15"></script>
+  <script src="renderer.js?v=20260724-v15"></script>
 </body>
 </html>

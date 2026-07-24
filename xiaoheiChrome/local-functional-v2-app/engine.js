@@ -50,6 +50,9 @@ class BrowserEngine {
   async init(bundledExtensionPath) {
     try {
       const saved = JSON.parse(await fsp.readFile(this.stateFile, 'utf8'));
+      for (const value of saved.profiles || []) {
+        try { const profile = this.sanitizeProfile(value); this.profiles.set(profile.id, profile); } catch (_) {}
+      }
       for (const extension of saved.extensions || []) if (fs.existsSync(extension.path)) this.extensions.set(extension.id, extension);
       for (const [profileId, ids] of Object.entries(saved.assignments || {})) this.assignments.set(profileId, new Set(ids));
     } catch (_) {}
@@ -63,7 +66,7 @@ class BrowserEngine {
   async persist() {
     await fsp.mkdir(path.dirname(this.stateFile), { recursive: true });
     const assignments = Object.fromEntries([...this.assignments].map(([id, values]) => [id, [...values]]));
-    await fsp.writeFile(this.stateFile, JSON.stringify({ extensions: [...this.extensions.values()], assignments }, null, 2), 'utf8');
+    await fsp.writeFile(this.stateFile, JSON.stringify({ profiles: [...this.profiles.values()], extensions: [...this.extensions.values()], assignments }, null, 2), 'utf8');
   }
 
   sanitizeProfile(value) {
@@ -116,8 +119,49 @@ class BrowserEngine {
         this.assignments.set(profile.id, assigned); assignmentsChanged = true;
       }
     }
-    if (assignmentsChanged) this.persist().catch((error) => this.emit({ type: 'sync-error', action: 'persist-profiles', message: error.message }));
+    this.persist().catch((error) => this.emit({ type: 'sync-error', action: 'persist-profiles', message: error.message }));
+    this.emit({ type: 'profiles', action: assignmentsChanged ? 'sync-and-assign' : 'sync' });
     return this.status();
+  }
+
+  nextProfileNumber() {
+    const values = [...this.profiles.values()].map((profile) => Number.parseInt(profile.number, 10)).filter((value) => Number.isInteger(value) && value > 0);
+    return values.length ? Math.max(...values) + 1 : 1;
+  }
+
+  getProfile(id) {
+    const safe = String(id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    return this.profiles.get(safe) || null;
+  }
+
+  async createProfile(value = {}) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid profile');
+    const number = Number.isInteger(Number(value.number)) && Number(value.number) > 0 ? Number(value.number) : this.nextProfileNumber();
+    let id = String(value.id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    if (!id) id = 'env-' + String(number).padStart(3, '0');
+    for (let suffix = 2; this.profiles.has(id); suffix += 1) id = 'env-' + String(number).padStart(3, '0') + '-' + suffix;
+    const profile = this.sanitizeProfile({ ...value, id, number, name: String(value.name || number), browser: 'Google Chrome' });
+    this.syncProfiles([profile]);
+    await this.persist();
+    this.emit({ type: 'profiles', action: 'create', ids: [profile.id] });
+    return this.status().find((item) => item.id === profile.id);
+  }
+
+  async updateProfile(id, patch = {}) {
+    const current = this.getProfile(id);
+    if (!current) throw new Error('Profile not found');
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid profile update');
+    const profile = this.sanitizeProfile({
+      ...current, ...patch, id: current.id,
+      privacy: { ...current.privacy, ...(patch.privacy || {}) },
+      advanced: { ...current.advanced, ...(patch.advanced || {}) },
+      proxyMeta: { ...current.proxyMeta, ...(patch.proxyMeta || {}) }
+    });
+    if (profile.proxy !== current.proxy) this.networkInfo.delete(profile.id);
+    this.profiles.set(profile.id, profile);
+    await this.persist();
+    this.emit({ type: 'profiles', action: 'update', ids: [profile.id] });
+    return this.status().find((item) => item.id === profile.id);
   }
 
   getProfileDataRoot() { return this.profileDataRootPath; }
@@ -315,6 +359,7 @@ class BrowserEngine {
 
   async start(raw) {
     const profile = this.sanitizeProfile(raw); this.profiles.set(profile.id, profile);
+    await this.persist();
     if (this.running.has(profile.id)) return this.publicRunning(profile.id);
     const extensions = this.assignedExtensions(profile.id);
     const browser = this.chooseBrowser(profile);
@@ -368,7 +413,7 @@ class BrowserEngine {
 
   publicRunning(id) {
     const item = this.running.get(id); if (!item) return { id, running: false };
-    return { id, running: true, pid: item.pid, port: item.port, browser: item.browser.name, executable: item.browser.path, profileDirectory: item.root, extensionCount: item.extensions.length, loadedExtensions: item.loadedExtensions || [], cdpError: item.cdpError || null };
+    return { id, running: true, pid: item.pid, port: item.port, debuggerAddress: item.port ? '127.0.0.1:' + item.port : null, browserURL: item.port ? 'http://127.0.0.1:' + item.port : null, browser: item.browser.name, executable: item.browser.path, profileDirectory: item.root, extensionCount: item.extensions.length, loadedExtensions: item.loadedExtensions || [], cdpError: item.cdpError || null };
   }
 
   async stop(id) {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, screen, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const cdp = require('./cdp');
 const { BrowserEngine } = require('./engine');
 const { LiveSyncController } = require('./live-sync-v5');
+const { LocalApiServer } = require('./local-api');
 
 // Keep the existing profile directory while presenting the new product name.
 app.setName('小黑多开器');
@@ -13,6 +14,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'browserops-local-sync
 
 const defaultProfileDataRoot = path.join(app.getPath('userData'), 'browser-profiles-v2');
 const localSettingsFile = path.join(app.getPath('userData'), 'browserops-local-settings.json');
+const apiSettingsFile = path.join(app.getPath('userData'), 'xiaohei-local-api.json');
 
 function normalizeProfileDataRoot(value) {
   const raw = String(value || '').trim();
@@ -47,6 +49,7 @@ async function updateProfileDataRoot(value) {
 
 let engine;
 let liveSync;
+let localApi;
 let quitting = false;
 let syncSelection = [];
 let syncState = { active: false, master: null, selected: [] };
@@ -247,6 +250,30 @@ async function fetchStorePackage(url, proxyValue = null) {
   } finally { clearTimeout(timer); }
 }
 
+function apiIntegrationInfo() {
+  if (!localApi) throw new Error('Local API is not ready');
+  const api = localApi.info();
+  const skillPath = path.join(__dirname, 'skills', 'xiaohei-browser');
+  const config = {
+    mcpServers: {
+      'xiaohei-local-api': {
+        command: process.execPath,
+        args: [path.join(__dirname, 'mcp-server.js')],
+        env: {
+          ELECTRON_RUN_AS_NODE: '1',
+          XIAOHEI_API_SETTINGS: api.settingsFile
+        }
+      }
+    }
+  };
+  const installCommands = {
+    agents: 'npx skills add timethrough/xiaohei-Chrome --skill xiaohei-browser -g',
+    openclaw: 'npx skills add timethrough/xiaohei-Chrome --skill xiaohei-browser -g -a openclaw',
+    hermes: 'Copy-Item -Recurse -Force "' + skillPath + '" "$HOME\\.hermes\\skills\\xiaohei-browser"'
+  };
+  return { ...api, skillPath, installCommands, mcpConfig: JSON.stringify(config, null, 2) };
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1500,
@@ -288,6 +315,8 @@ app.whenReady().then(async () => {
   liveSync = new LiveSyncController(engine, handleLiveSyncEvent);
   await engine.init(path.join(__dirname, 'bundled-extension'));
   engine.on((value) => emit(value));
+  localApi = new LocalApiServer({ engine, settingsFile: apiSettingsFile, version: app.getVersion() });
+  await localApi.init();
   startShortcutBridge();
   registerTextShortcuts();
 
@@ -305,6 +334,30 @@ app.whenReady().then(async () => {
     const profileRoot = engine.getProfileDataRoot(); await fsp.mkdir(profileRoot, { recursive: true });
     const message = await shell.openPath(profileRoot); if (message) throw new Error(message);
     return { success: true, profileRoot };
+  });
+  ipcMain.handle('system:copy-text', (_event, value) => {
+    const text = String(value || '').slice(0, 2_000_000);
+    clipboard.writeText(text);
+    return { success: true, length: text.length };
+  });
+  ipcMain.handle('api:info', () => apiIntegrationInfo());
+  ipcMain.handle('api:reset-key', async () => {
+    await localApi.resetKey();
+    const info = apiIntegrationInfo();
+    emit({ type: 'api-settings', info });
+    return info;
+  });
+  ipcMain.handle('api:set-enabled', async (_event, enabled) => {
+    await localApi.setEnabled(Boolean(enabled));
+    const info = apiIntegrationInfo();
+    emit({ type: 'api-settings', info });
+    return info;
+  });
+  ipcMain.handle('api:open-skill', async () => {
+    const skillPath = path.join(__dirname, 'skills', 'xiaohei-browser');
+    const message = await shell.openPath(skillPath);
+    if (message) throw new Error(message);
+    return { success: true, skillPath };
   });
   ipcMain.handle('profiles:sync', (_event, profiles) => engine.syncProfiles(profiles));
   ipcMain.handle('profiles:delete', async (_event, payload) => {
@@ -431,8 +484,9 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', (event) => {
-  if (quitting || !engine || engine.running.size === 0) return;
-  event.preventDefault(); quitting = true; engine.stopAll().finally(() => app.quit());
+  if (quitting || !engine) return;
+  event.preventDefault(); quitting = true;
+  Promise.all([engine.stopAll(), localApi?.close()]).finally(() => app.quit());
 });
 app.on('will-quit', () => stopShortcutBridge());
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

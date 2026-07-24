@@ -45,3 +45,5 @@ tmp/
 credentials.json
 browserops-local-settings.json
 browserops-v2-engine.json
+
+xiaohei-local-api.json
