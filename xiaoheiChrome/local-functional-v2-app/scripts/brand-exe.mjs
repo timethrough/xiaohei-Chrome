@@ -13,8 +13,8 @@ await rcedit(exePath, {
     LegalCopyright: 'AGPL-3.0-or-later',
     OriginalFilename: '小黑多开器.exe'
   },
-  'file-version': '14.0.0.0',
-  'product-version': '14.0.0.0',
+  'file-version': '15.0.0.0',
+  'product-version': '15.0.0.0',
   icon: iconPath,
   'requested-execution-level': 'asInvoker'
 });

@@ -46,6 +46,19 @@ function normalizeProfileSettings(profile) {
   };
 }
 
+function profileRecordFromEngine(profile) {
+  const value = profile && typeof profile === 'object' ? profile : {};
+  const { running, pid, port, debuggerAddress, browserURL, executable, profileDirectory, extensionCount, loadedExtensions, assignedExtensions, cdpError, network, automation, ...record } = value;
+  return normalizeProfileSettings(record);
+}
+
+function syncUiProfilesFromEngine() {
+  ui.profiles = engineProfiles.map(profileRecordFromEngine);
+  const maximum = ui.profiles.reduce((value, profile) => Math.max(value, positiveProfileNumber(profile.number)), 0);
+  ui.nextProfileNumber = Math.max(positiveProfileNumber(ui.nextProfileNumber), maximum + 1, 1);
+  save();
+}
+
 function loadUi() {
   try { const value = JSON.parse(localStorage.getItem(UI_KEY)); if (value && Array.isArray(value.profiles)) return value; } catch (_) {}
   return { profiles: defaultProfiles(), logs: [] };
@@ -83,6 +96,7 @@ function createInternalProfileId(number, usedIds = new Set(ui.profiles.map((prof
 }
 
 let engineProfiles = [];
+let apiInfo = null;
 let extensions = [];
 let sessions = [];
 let sessionsInitialized = false;
@@ -306,7 +320,7 @@ function renderEditorSummary() {
     const report = window.EnvironmentAudit.build(draft, { systemTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
     auditTarget.replaceChildren();
     const head = element('div', 'audit-head');
-    head.append(element('strong', '', 'V14 环境一致性检查'), element('span', report.status, report.warnings ? `${report.warnings} 项需确认` : '配置一致'));
+    head.append(element('strong', '', 'V15 环境一致性检查'), element('span', report.status, report.warnings ? `${report.warnings} 项需确认` : '配置一致'));
     auditTarget.append(head);
     for (const check of report.checks) {
       const row = element('div', `audit-row ${check.state}`);
@@ -359,6 +373,7 @@ const viewMeta = {
   'profile-editor': ['编辑浏览器环境', '独立 Chrome 环境的网络、隐私和启动设置'],
   extensions: ['应用中心', '批量分配本地 Chrome 扩展'],
   sync: ['窗口同步', '窗口、文本和标签页的 CDP 批量管理'],
+  api: ['API & MCP', '本地接口、自动化框架、MCP 与 AI Skill'],
   logs: ['操作日志', '本地引擎执行记录'],
   system: ['本地设置', '运行时与能力状态']
 };
@@ -367,7 +382,7 @@ function switchView(view) {
   $$('.nav').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
   $$('.view').forEach((section) => section.classList.toggle('active', section.id === `view-${view}`));
   $('#page-title').textContent = viewMeta[view][0]; $('#page-subtitle').textContent = viewMeta[view][1];
-  if (view === 'sync') refreshSessions(); if (view === 'extensions') refreshExtensions();
+  if (view === 'sync') refreshSessions(); if (view === 'extensions') refreshExtensions(); if (view === 'api') refreshApiInfo();
 }
 
 function renderProfiles() {
@@ -424,8 +439,10 @@ function visibleProfilePageIds() {
   return filtered.slice(pageStart, pageStart + profilePageSize).map((profile) => profile.id);
 }
 
-async function refreshStatus() {
-  engineProfiles = await window.ops.profileStatus(); renderProfiles();
+async function refreshStatus(syncUi = false) {
+  engineProfiles = await window.ops.profileStatus();
+  if (syncUi) syncUiProfilesFromEngine();
+  renderProfiles();
 }
 
 async function startProfile(id) {
@@ -910,7 +927,65 @@ $('#choose-profile-storage').addEventListener('click', chooseProfileStorage);
 $('#reset-profile-storage').addEventListener('click', resetProfileStorage);
 $('#open-profile-storage').addEventListener('click', async () => { try { await window.ops.openProfileStorage(); } catch (error) { toast(error.message); log('Error', error.message); } });
 
+async function copyIntegrationValue(value, successMessage) {
+  if (!value) return toast('没有可复制的内容');
+  await window.ops.copyText(String(value));
+  toast(successMessage || '已复制');
+}
+
+function renderApiInfo(info) {
+  apiInfo = info || null;
+  if (!apiInfo) return;
+  const running = Boolean(apiInfo.running);
+  $('#api-enabled').checked = Boolean(apiInfo.enabled);
+  $('#api-status-dot').classList.toggle('running', running);
+  $('#api-status-dot').classList.toggle('failed', Boolean(apiInfo.enabled && !running));
+  $('#api-status-text').textContent = running ? '接口运行中' : apiInfo.enabled ? '接口启动失败' : '接口已停用';
+  $('#api-security-summary').textContent = apiInfo.lastError ? apiInfo.lastError : '仅本机 · 强制 Key · 每分钟限流';
+  $('#api-url').textContent = apiInfo.url || '';
+  $('#api-key').value = apiInfo.apiKey || '';
+  $('#mcp-config').textContent = apiInfo.mcpConfig || '';
+  $('#skill-path').textContent = apiInfo.skillPath || '';
+  $('#skill-install-agents').textContent = apiInfo.installCommands?.agents || '';
+  $('#skill-install-openclaw').textContent = apiInfo.installCommands?.openclaw || '';
+  $('#skill-install-hermes').textContent = apiInfo.installCommands?.hermes || '';
+}
+
+async function refreshApiInfo() {
+  try { renderApiInfo(await window.ops.getApiInfo()); }
+  catch (error) { $('#api-status-text').textContent = '接口信息读取失败'; $('#api-security-summary').textContent = error.message; }
+}
+
+$('#api-enabled').addEventListener('change', async (event) => {
+  const input = event.currentTarget; input.disabled = true;
+  try { renderApiInfo(await window.ops.setApiEnabled(input.checked)); toast(input.checked ? 'Local API 已启用' : 'Local API 已停用'); }
+  catch (error) { input.checked = !input.checked; toast('切换接口失败：' + error.message); }
+  finally { input.disabled = false; }
+});
+$('#copy-api-url').addEventListener('click', () => copyIntegrationValue(apiInfo?.url, '接口地址已复制'));
+$('#copy-api-key').addEventListener('click', () => copyIntegrationValue(apiInfo?.apiKey, 'API Key 已复制，请勿上传或分享'));
+$('#toggle-api-key').addEventListener('click', () => {
+  const field = $('#api-key'); const visible = field.type === 'text'; field.type = visible ? 'password' : 'text'; $('#toggle-api-key').textContent = visible ? '显示' : '隐藏';
+});
+$('#reset-api-key').addEventListener('click', async () => {
+  if (!window.confirm('重置后，旧 Key 会立即失效。确定继续吗？')) return;
+  try { renderApiInfo(await window.ops.resetApiKey()); toast('API Key 已重置'); }
+  catch (error) { toast('重置失败：' + error.message); }
+});
+$('#copy-mcp-config').addEventListener('click', () => copyIntegrationValue(apiInfo?.mcpConfig, 'MCP 配置已复制'));
+$('#copy-skill-path').addEventListener('click', () => copyIntegrationValue(apiInfo?.skillPath, 'Skill 路径已复制'));
+$('#copy-skill-install-agents').addEventListener('click', () => copyIntegrationValue(apiInfo?.installCommands?.agents, '通用 Skill 安装命令已复制'));
+$('#copy-skill-install-openclaw').addEventListener('click', () => copyIntegrationValue(apiInfo?.installCommands?.openclaw, 'OpenClaw 安装命令已复制'));
+$('#copy-skill-install-hermes').addEventListener('click', () => copyIntegrationValue(apiInfo?.installCommands?.hermes, 'Hermes 安装命令已复制'));
+$('#open-skill-folder').addEventListener('click', async () => { try { await window.ops.openSkillFolder(); } catch (error) { toast(error.message); } });
+$$('[data-automation-tab]').forEach((button) => button.addEventListener('click', () => {
+  $$('[data-automation-tab]').forEach((item) => item.classList.toggle('active', item === button));
+  $$('.api-code').forEach((panel) => panel.classList.toggle('active', panel.id === 'automation-' + button.dataset.automationTab));
+}));
+
 window.ops.onEvent(async (value) => {
+  if (value.type === 'profiles') { await refreshStatus(true); await refreshSessions(); await refreshExtensions(); }
+  if (value.type === 'api-settings' && value.info) renderApiInfo(value.info);
   if (value.type === 'status') { await refreshStatus(); await refreshSessions(); }
   if (value.type === 'extensions') await refreshExtensions();
   if (value.type === 'storage-settings') updateProfileStorageDisplay(value.profileRoot);
@@ -970,7 +1045,7 @@ async function initialize() {
   syncState = await window.ops.getSyncState(); preferredMasterId = syncState.master || null; if (syncState.active) selectedSessions = new Set(syncState.selected || []);
   await applySyncSettings(syncSettings); fillSyncSettingsForm();
   ui.profiles = ui.profiles.map((item) => ({ ...item, browser: 'Google Chrome' })); save();
-  engineProfiles = await window.ops.syncProfiles(ui.profiles); await refreshExtensions(); await refreshSessions(); renderProfiles(); renderLogs(); log('System', `引擎启动 · ${info.browsers.length} 个浏览器可用`);
+  engineProfiles = await window.ops.syncProfiles(ui.profiles); syncUiProfilesFromEngine(); await refreshExtensions(); await refreshSessions(); await refreshApiInfo(); renderProfiles(); renderLogs(); log('System', `V15 引擎启动 · ${info.browsers.length} 个浏览器可用`);
 }
 initialize().catch((error) => { log('Error', error.message); toast(error.message); });
 

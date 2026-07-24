@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $electronExe)) {
 & (Join-Path $PSScriptRoot 'build-native.ps1') -OutputDirectory $appRoot
 
 $distRoot = Join-Path $appRoot 'dist'
-$packageRoot = Join-Path $distRoot '小黑多开器-V14-Windows便携版'
+$packageRoot = Join-Path $distRoot '小黑多开器-V15-Windows便携版'
 $runtimeRoot = Join-Path $packageRoot 'runtime'
 $resourceApp = Join-Path $runtimeRoot 'resources\app'
 if (Test-Path -LiteralPath $packageRoot) { Remove-Item -LiteralPath $packageRoot -Recurse -Force }
@@ -57,21 +57,22 @@ exit /b 1
 [System.IO.File]::WriteAllText((Join-Path $packageRoot 'START.cmd'), $launcher, [System.Text.Encoding]::ASCII)
 
 $instructions = @'
-小黑多开器 V14 Windows 便携版
+小黑多开器 V15 Windows 便携版
 
 1. 解压完整压缩包，不要只复制单个 EXE。
 2. 双击 START.cmd 启动。
 3. 本目录 runtime 内含官方 Electron/Chromium 运行环境。
 4. 浏览器环境功能仍需要电脑已安装 Google Chrome。
 5. 环境数据默认保存在当前 Windows 用户的 AppData\Roaming\browserops-local-sync 中；也可在“本地设置”修改。
-6. 请勿把 Cookies、代理密码或浏览器 Profile 上传到 GitHub。
+6. “API & MCP”默认只监听 127.0.0.1，所有业务请求必须携带本机 API Key。
+7. 请勿把 API Key、Cookies、代理密码或浏览器 Profile 上传到 GitHub。
 
 本便携包不包含任何第三方商业浏览器二进制。
 '@
 [System.IO.File]::WriteAllText((Join-Path $packageRoot '运行说明.txt'), $instructions, (New-Object System.Text.UTF8Encoding($true)))
 
 if (-not $SkipZip) {
-  $zip = Join-Path $distRoot '小黑多开器-V14-Windows便携版.zip'
+  $zip = Join-Path $distRoot '小黑多开器-V15-Windows便携版.zip'
   if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
   Compress-Archive -LiteralPath $packageRoot -DestinationPath $zip -CompressionLevel Optimal
   Write-Host ('便携版压缩包：' + $zip)
